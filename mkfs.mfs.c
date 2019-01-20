@@ -36,7 +36,8 @@ static void show_usage(const char *executable) {
     -b <blocksize>: blocksize in bytes (default: %" PRIu64 ")\n\
     -v            : verbose\n\
     -h            : help\n\
-",executable,MFS_DEFAULT_BLOCKSIZE);
+version: %lu.%lu\n\
+",executable,MFS_DEFAULT_BLOCKSIZE,MFS_GET_MAJOR_VERSION(MFS_VERSION),MFS_GET_MINOR_VERSION(MFS_VERSION));
 }
 
 static int parse_commandline(int argc,char ** argv, struct mfs_mkfs_config *config) 
