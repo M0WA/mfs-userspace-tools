@@ -144,7 +144,7 @@ int main(int argc,char ** argv)
     if( err != 0 ) {
         goto release; }
     if(conf.verbose) {
-        fprintf(stderr,"superblock created\n"); }
+        fprintf(stderr,"superblock created, version %lu.%lu\n",MFS_GET_MAJOR_VERSION(sb.sb.version),MFS_GET_MINOR_VERSION(sb.sb.version)); }
 
     if(conf.verbose) {
         fprintf(stderr,"writing superblock\n"); }
