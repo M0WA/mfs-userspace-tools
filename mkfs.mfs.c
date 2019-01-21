@@ -4,14 +4,15 @@
 #include <getopt.h>
 #include <stdint.h>
 #include <fcntl.h>
-#include <unistd.h>
 #include <errno.h>
+#include <unistd.h>
 #include <inttypes.h>
 
 #include <superblock.h>
 #include <fs.h>
 
-#define MAX_LEN_DEVICENAME    255
+#include "libmfs.h"
+
 #define MFS_DEFAULT_BLOCKSIZE (uint64_t)512
 
 static struct option long_options[] = {
@@ -65,7 +66,6 @@ static int parse_commandline(int argc,char ** argv, struct mfs_mkfs_config *conf
             strncat(config->device,optarg,MAX_LEN_DEVICENAME-1);
             break;
         case '?':
-            break;
         default:
             fprintf(stderr,"unknown error while parsing command line arguments\n");
             return 1;
@@ -80,33 +80,6 @@ static int parse_commandline(int argc,char ** argv, struct mfs_mkfs_config *conf
         return 1;
     }
 
-    return 0;
-}
-
-static int open_blockdevice(const struct mfs_mkfs_config *conf, int *fh) {
-    *fh = open(conf->device,O_RDWR);
-    if(*fh <= 0) {
-        fprintf(stderr,"could not open device %s for r/w: %s\n",conf->device,strerror(errno));
-        return errno;
-    }
-    return 0;
-}
-
-static int write_blockdevice(int fh,void *data,size_t datalen) {
-    ssize_t written = write(fh,data,datalen);
-    if(written == -1) {
-        fprintf(stderr,"could not write to device: %s\n",strerror(errno));
-        return errno;
-    }
-    if(((size_t)written) != datalen) {
-        fprintf(stderr,"incomplete write to device: %s\n",strerror(errno));
-        return errno;
-    }
-
-    if(fsync(fh) != 0) {
-        fprintf(stderr,"could not fsync to device: %s\n",strerror(errno));
-        return errno;
-    }
     return 0;
 }
 
@@ -133,7 +106,7 @@ int main(int argc,char ** argv)
 
     if(conf.verbose) {
         fprintf(stderr,"opening block device %s\n",conf.device); }
-    err = open_blockdevice(&conf, &fh);
+    err = open_blockdevice(conf.device, &fh);
     if( err != 0 ) {
         goto release; }
     if(conf.verbose) {

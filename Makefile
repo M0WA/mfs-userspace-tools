@@ -1,14 +1,32 @@
-BINARY=mkfs.mfs
+FSNAME=mfs
 GCC=gcc
 
 CFLAGS := -I../kernel-module/
 
-all: clean $(BINARY)
+all: 
+	$(MAKE) clean
+	$(MAKE) lib$(FSNAME) 
+	$(MAKE) mkfs.$(FSNAME) 
+	$(MAKE) fsck.$(FSNAME)
 
-$(BINARY):
-	$(GCC) $(CFLAGS) mkfs.mfs.c -o $(BINARY)
+lib$(FSNAME):
+	$(GCC) $(CFLAGS) -c lib$(FSNAME).c -o lib$(FSNAME).o
 
-clean:
-	rm -f *.o $(BINARY)
+clean_lib$(FSNAME):
+	rm -f lib$(FSNAME).o
 
-.PHONY: all clean
+mkfs.$(FSNAME):
+	$(GCC) $(CFLAGS) mkfs.$(FSNAME).c lib$(FSNAME).c -o mkfs.$(FSNAME)
+
+clean_mkfs:
+	rm -f mkfs.$(FSNAME).o lib$(FSNAME).o mkfs.$(FSNAME)
+
+fsck.$(FSNAME):
+	$(GCC) $(CFLAGS) fsck.$(FSNAME).c lib$(FSNAME).c -o fsck.$(FSNAME)
+
+clean_fsck:
+	rm -f fsck.$(FSNAME).o fsck.$(FSNAME)
+
+clean: clean_lib$(FSNAME) clean_fsck clean_mkfs
+
+.PHONY: all clean clean_fsck clean_mkfs clean_lib$(FSNAME)
