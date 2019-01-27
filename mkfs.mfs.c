@@ -13,7 +13,7 @@
 
 #include "libmfs.h"
 
-#define MFS_DEFAULT_BLOCKSIZE (uint64_t)512
+#define MFS_DEFAULT_BLOCKSIZE (uint64_t)-1
 
 static struct option long_options[] = {
     {"device"   , required_argument, 0, 'd'},
@@ -34,11 +34,11 @@ static void show_usage(const char *executable) {
 "creates a mfs filesystem on a device\n\
 %s -d <devicename> [-v]\n\
     -d <device>   : blockdevice name\n\
-    -b <blocksize>: blocksize in bytes (default: %" PRIu64 ")\n\
+    -b <blocksize>: blocksize in bytes (default: use sectorsize of blockdevice)\n\
     -v            : verbose\n\
     -h            : help\n\
 version: %lu.%lu\n\
-",executable,MFS_DEFAULT_BLOCKSIZE,MFS_GET_MAJOR_VERSION(MFS_VERSION),MFS_GET_MINOR_VERSION(MFS_VERSION));
+",executable,MFS_GET_MAJOR_VERSION(MFS_VERSION),MFS_GET_MINOR_VERSION(MFS_VERSION));
 }
 
 static int parse_commandline(int argc,char ** argv, struct mfs_mkfs_config *config) 
@@ -56,11 +56,11 @@ static int parse_commandline(int argc,char ** argv, struct mfs_mkfs_config *conf
         case 'd':
             if(!optarg) {
                 fprintf(stderr,"no device found in -d <device>\n");
-                return 1;
+                return -EINVAL;
             }
             if(strlen(optarg) > (MAX_LEN_DEVICENAME - 1)) {
                 fprintf(stderr,"device name too long in -d <device>\n");
-                return 1;
+                return -EINVAL;
             }
             config->device[0] = 0;
             strncat(config->device,optarg,MAX_LEN_DEVICENAME-1);
@@ -68,7 +68,7 @@ static int parse_commandline(int argc,char ** argv, struct mfs_mkfs_config *conf
         case '?':
         default:
             fprintf(stderr,"unknown error while parsing command line arguments\n");
-            return 1;
+            return -EINVAL;
         }
     }
 
@@ -77,7 +77,7 @@ static int parse_commandline(int argc,char ** argv, struct mfs_mkfs_config *conf
     }
     if(!config->device[0]) {
         fprintf(stderr,"no device given, please specify -d <device>\n");
-        return 1;
+        return -EINVAL;
     }
 
     return 0;
@@ -115,6 +115,7 @@ int main(int argc,char ** argv)
     int err = 0;
     uint64_t bytes = 0;
     uint64_t blocks = 0;
+    int sectorsize = -1;
     memset(&conf,0,sizeof(struct mfs_mkfs_config));
     memset(&sb,0,sizeof(union mfs_padded_super_block));
 
@@ -130,13 +131,32 @@ int main(int argc,char ** argv)
     if(conf.verbose) {
         fprintf(stderr,"block device %s is open\n",conf.device); }
 
+    sectorsize = sectorsize_blockdevice(fh);
+    if(conf.block_size <= 0) {
+        conf.block_size = sectorsize;
+    } else {
+        fprintf(stderr,"warn: blocksize(%lu) does not match sectorsize(%d)\n",conf.block_size,sectorsize);
+        if(sectorsize > conf.block_size ) {
+            fprintf(stderr,"blocksize(%lu) is smaller than sectorsize(%d)\n",conf.block_size,sectorsize);
+            err = -EINVAL;
+            goto release;
+        }
+        if( (sectorsize % conf.block_size) != 0 ) {
+            fprintf(stderr,"blocksize(%lu) is not a multiple of sectorsize(%d)\n",conf.block_size,sectorsize);
+            err = -EINVAL;
+            goto release;
+        }
+    }
+    if(conf.verbose) {
+        fprintf(stderr,"blocksize: %lu, sectorsize: %d\n",conf.block_size,sectorsize); }
+
     bytes = bytecount_blockdevice(fh);
     blocks = bytes / conf.block_size;
     if(!blocks) {
         fprintf(stderr,"block device %s has no free space\n",conf.device);
         goto release; }
     if(conf.verbose) {
-        fprintf(stderr,"device has %lu MB free space\n", ( (blocks*conf.block_size)/1024/1024) ); }
+        fprintf(stderr,"device has %lu MB free space in %lu blocks\n", ( (blocks*conf.block_size)/1024/1024), blocks ); }
 
     if(conf.verbose) {
         fprintf(stderr,"creating superblock\n"); }
@@ -180,5 +200,5 @@ release:
         if(conf.verbose) {
             fprintf(stderr,"blockdevice closed\n"); }
     }
-    return 0;
+    return err;
 }
