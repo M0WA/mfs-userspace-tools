@@ -45,8 +45,8 @@ uint64_t bytecount_blockdevice(int fh) {
     return size;
 }
 
-int sectorsize_blockdevice(int fh) {
-    int  size;
+unsigned int sectorsize_blockdevice(int fh) {
+    unsigned int  size;
     if ( ioctl(fh,BLKSSZGET,&size) == -1) {
         return -1;
     }

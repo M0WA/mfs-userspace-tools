@@ -13,7 +13,10 @@
 
 #include "libmfs.h"
 
-#define MFS_DEFAULT_BLOCKSIZE (uint64_t)-1
+#define MFS_DEFAULT_BLOCKSIZE   0
+#define BITS_PER_BYTE           8
+#define DIV_ROUND_UP(n,d)       (((n) + (d) - 1) / (d))
+#define BITS_TO_LONGS(nr)       DIV_ROUND_UP(nr, BITS_PER_BYTE * sizeof(long))
 
 static struct option long_options[] = {
     {"device"   , required_argument, 0, 'd'},
@@ -26,7 +29,7 @@ static struct option long_options[] = {
 struct mfs_mkfs_config {
     int verbose;
     char device[MAX_LEN_DEVICENAME];
-    uint64_t block_size;
+    uint32_t block_size;
 };
 
 static void show_usage(const char *executable) {
@@ -92,15 +95,47 @@ static int create_superblock(const struct mfs_mkfs_config *conf,struct mfs_super
     return 0;
 }
 
-static int write_zero_bitmap(int fh,uint64_t bits) {
-    #define BITS_PER_BYTE           8
-    #define DIV_ROUND_UP(n,d) (((n) + (d) - 1) / (d))
-    #define BITS_TO_LONGS(nr)       DIV_ROUND_UP(nr, BITS_PER_BYTE * sizeof(long))
+static void set_bit_bitmap(unsigned long *bitmap,size_t bit) {
+    size_t lpos = bit / sizeof(unsigned long);
+    size_t bpos = bit % sizeof(unsigned long);
+    size_t mask = 1 << bit;
 
-    int err = 0;
+    unsigned long *bits = &bitmap[lpos];
+    (*bits) = (*bits) | mask;
+}
+
+static unsigned long *create_zero_bitmap(int fh,uint64_t bits) {
+
     unsigned long *bitmap = calloc(BITS_TO_LONGS(bits),sizeof(unsigned long));
     if(!bitmap) {
-        return 1;
+        return NULL;
+    }
+    return bitmap;
+}
+
+static int write_freemap(int fh,uint64_t bits,uint32_t block_size) {
+    int err;
+    unsigned long *bitmap = NULL;
+    size_t used_bytes = sizeof(union mfs_padded_super_block) + (BITS_TO_LONGS(bits) * sizeof(unsigned long) * 2);
+    size_t used_blocks = used_bytes / block_size;
+
+    bitmap = create_zero_bitmap(fh,bits);
+    if(!bitmap) {
+        return -ENOMEM;
+    }
+    for(size_t b = 0; b < used_blocks; b++) {
+        set_bit_bitmap(bitmap,b);
+    }
+    err = write_blockdevice(fh,bitmap,BITS_TO_LONGS(bits)*sizeof(unsigned long));
+    free(bitmap);
+    return err;
+}
+
+static int write_inodemap(int fh,uint64_t bits) {
+    int err;
+    unsigned long *bitmap = create_zero_bitmap(fh,bits);
+    if(!bitmap) {
+        return -ENOMEM;
     }
     err = write_blockdevice(fh,bitmap,BITS_TO_LONGS(bits)*sizeof(unsigned long));
     free(bitmap);
@@ -115,7 +150,7 @@ int main(int argc,char ** argv)
     int err = 0;
     uint64_t bytes = 0;
     uint64_t blocks = 0;
-    int sectorsize = -1;
+    unsigned int sectorsize = -1;
     memset(&conf,0,sizeof(struct mfs_mkfs_config));
     memset(&sb,0,sizeof(union mfs_padded_super_block));
 
@@ -132,23 +167,23 @@ int main(int argc,char ** argv)
         fprintf(stderr,"block device %s is open\n",conf.device); }
 
     sectorsize = sectorsize_blockdevice(fh);
-    if(conf.block_size <= 0) {
+    if(conf.block_size == 0) {
         conf.block_size = sectorsize;
     } else {
-        fprintf(stderr,"warn: blocksize(%lu) does not match sectorsize(%d)\n",conf.block_size,sectorsize);
+        fprintf(stderr,"warn: blocksize(%u) does not match sectorsize(%d)\n",conf.block_size,sectorsize);
         if(sectorsize > conf.block_size ) {
-            fprintf(stderr,"blocksize(%lu) is smaller than sectorsize(%d)\n",conf.block_size,sectorsize);
+            fprintf(stderr,"blocksize(%u) is smaller than sectorsize(%d)\n",conf.block_size,sectorsize);
             err = -EINVAL;
             goto release;
         }
         if( (sectorsize % conf.block_size) != 0 ) {
-            fprintf(stderr,"blocksize(%lu) is not a multiple of sectorsize(%d)\n",conf.block_size,sectorsize);
+            fprintf(stderr,"blocksize(%u) is not a multiple of sectorsize(%d)\n",conf.block_size,sectorsize);
             err = -EINVAL;
             goto release;
         }
     }
     if(conf.verbose) {
-        fprintf(stderr,"blocksize: %lu, sectorsize: %d\n",conf.block_size,sectorsize); }
+        fprintf(stderr,"blocksize: %u, sectorsize: %u\n",conf.block_size,sectorsize); }
 
     bytes = bytecount_blockdevice(fh);
     blocks = bytes / conf.block_size;
@@ -176,7 +211,7 @@ int main(int argc,char ** argv)
 
     if(conf.verbose) {
         fprintf(stderr,"writing free blocks bitmap (mapsize: %lu KB)\n",(blocks/8/1024)); }
-    err = write_zero_bitmap(fh,blocks);
+    err = write_freemap(fh,blocks,conf.block_size);
     if( err != 0 ) {
         goto release; }
     if(conf.verbose) {
@@ -184,12 +219,11 @@ int main(int argc,char ** argv)
 
     if(conf.verbose) {
         fprintf(stderr,"writing inode bitmap (mapsize: %lu KB)\n",(blocks/8/1024)); }
-    err = write_zero_bitmap(fh,blocks);
+    err = write_inodemap(fh,blocks);
     if( err != 0 ) {
         goto release; }
     if(conf.verbose) {
         fprintf(stderr,"inode bitmap written\n"); }
-    
 
 release:
     if(fh > 0) {
