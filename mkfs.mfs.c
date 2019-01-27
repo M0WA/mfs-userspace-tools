@@ -44,7 +44,7 @@ version: %lu.%lu\n\
 ",executable,MFS_GET_MAJOR_VERSION(MFS_VERSION),MFS_GET_MINOR_VERSION(MFS_VERSION));
 }
 
-static int parse_commandline(int argc,char ** argv, struct mfs_mkfs_config *config) 
+static int parse_commandline(int argc,char ** argv, struct mfs_mkfs_config *config)
 {
     int c;
     int option_index = 0;
@@ -86,7 +86,7 @@ static int parse_commandline(int argc,char ** argv, struct mfs_mkfs_config *conf
     return 0;
 }
 
-static int create_superblock(const struct mfs_mkfs_config *conf,struct mfs_super_block *sb,uint64_t blocks) 
+static int create_superblock(const struct mfs_mkfs_config *conf,struct mfs_super_block *sb,uint64_t blocks)
 {
     sb->version = MFS_VERSION;
     sb->magic = MFS_MAGIC_NUMBER;
@@ -142,7 +142,7 @@ static int write_inodemap(int fh,uint64_t bits) {
     return err;
 }
 
-int main(int argc,char ** argv) 
+int main(int argc,char ** argv)
 {
     struct mfs_mkfs_config conf;
     union mfs_padded_super_block sb;

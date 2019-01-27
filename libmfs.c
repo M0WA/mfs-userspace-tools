@@ -9,7 +9,7 @@
 #include <sys/ioctl.h>
 #include <linux/fs.h>
 
-int open_blockdevice(const char *device, int *fh) 
+int open_blockdevice(const char *device, int *fh)
 {
     *fh = open(device,O_RDWR);
     if(*fh <= 0) {
@@ -51,5 +51,5 @@ unsigned int sectorsize_blockdevice(int fh) {
         return -1;
     }
     return size;
-    
+
 }
