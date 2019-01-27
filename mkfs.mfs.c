@@ -83,12 +83,28 @@ static int parse_commandline(int argc,char ** argv, struct mfs_mkfs_config *conf
     return 0;
 }
 
-static int create_superblock(const struct mfs_mkfs_config *conf,struct mfs_super_block *sb) 
+static int create_superblock(const struct mfs_mkfs_config *conf,struct mfs_super_block *sb,uint64_t blocks) 
 {
     sb->version = MFS_VERSION;
     sb->magic = MFS_MAGIC_NUMBER;
     sb->block_size = conf->block_size;
+    sb->block_count = blocks;
     return 0;
+}
+
+static int write_zero_bitmap(int fh,uint64_t bits) {
+    #define BITS_PER_BYTE           8
+    #define DIV_ROUND_UP(n,d) (((n) + (d) - 1) / (d))
+    #define BITS_TO_LONGS(nr)       DIV_ROUND_UP(nr, BITS_PER_BYTE * sizeof(long))
+
+    int err = 0;
+    unsigned long *bitmap = calloc(BITS_TO_LONGS(bits),sizeof(unsigned long));
+    if(!bitmap) {
+        return 1;
+    }
+    err = write_blockdevice(fh,bitmap,BITS_TO_LONGS(bits)*sizeof(unsigned long));
+    free(bitmap);
+    return err;
 }
 
 int main(int argc,char ** argv) 
@@ -97,6 +113,8 @@ int main(int argc,char ** argv)
     union mfs_padded_super_block sb;
     int fh = -1;
     int err = 0;
+    uint64_t bytes = 0;
+    uint64_t blocks = 0;
     memset(&conf,0,sizeof(struct mfs_mkfs_config));
     memset(&sb,0,sizeof(union mfs_padded_super_block));
 
@@ -112,9 +130,17 @@ int main(int argc,char ** argv)
     if(conf.verbose) {
         fprintf(stderr,"block device %s is open\n",conf.device); }
 
+    bytes = bytecount_blockdevice(fh);
+    blocks = bytes / conf.block_size;
+    if(!blocks) {
+        fprintf(stderr,"block device %s has no free space\n",conf.device);
+        goto release; }
+    if(conf.verbose) {
+        fprintf(stderr,"device has %lu MB free space\n", ( (blocks*conf.block_size)/1024/1024) ); }
+
     if(conf.verbose) {
         fprintf(stderr,"creating superblock\n"); }
-    err = create_superblock(&conf,&sb.sb);
+    err = create_superblock(&conf,&sb.sb,blocks);
     if( err != 0 ) {
         goto release; }
     if(conf.verbose) {
@@ -127,6 +153,23 @@ int main(int argc,char ** argv)
         goto release; }
     if(conf.verbose) {
         fprintf(stderr,"superblock written\n"); }
+
+    if(conf.verbose) {
+        fprintf(stderr,"writing free blocks bitmap (mapsize: %lu KB)\n",(blocks/8/1024)); }
+    err = write_zero_bitmap(fh,blocks);
+    if( err != 0 ) {
+        goto release; }
+    if(conf.verbose) {
+        fprintf(stderr,"free blocks bitmap written\n"); }
+
+    if(conf.verbose) {
+        fprintf(stderr,"writing inode bitmap (mapsize: %lu KB)\n",(blocks/8/1024)); }
+    err = write_zero_bitmap(fh,blocks);
+    if( err != 0 ) {
+        goto release; }
+    if(conf.verbose) {
+        fprintf(stderr,"inode bitmap written\n"); }
+    
 
 release:
     if(fh > 0) {
