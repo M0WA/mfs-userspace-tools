@@ -32,7 +32,8 @@ struct mfs_mkfs_config {
     uint32_t block_size;
 };
 
-static void show_usage(const char *executable) {
+static void show_usage(const char *executable) 
+{
     printf(
 "creates a mfs filesystem on a device\n\
 %s -d <devicename> [-v]\n\
@@ -95,17 +96,18 @@ static int create_superblock(const struct mfs_mkfs_config *conf,struct mfs_super
     return 0;
 }
 
-static void set_bit_bitmap(unsigned long *bitmap,size_t bit) {
-    size_t lpos = bit / sizeof(unsigned long);
-    size_t bpos = bit % sizeof(unsigned long);
-    size_t mask = 1 << bit;
+static void set_bit_bitmap(unsigned long *bitmap,size_t bit) 
+{
+    size_t lpos = bit / (sizeof(unsigned long)*8);
+    size_t bpos = bit % (sizeof(unsigned long)*8);
+    unsigned long mask = 1 << bit;
 
     unsigned long *bits = &bitmap[lpos];
     (*bits) = (*bits) | mask;
 }
 
-static unsigned long *create_zero_bitmap(int fh,uint64_t bits) {
-
+static unsigned long *create_zero_bitmap(int fh,uint64_t bits) 
+{
     unsigned long *bitmap = calloc(BITS_TO_LONGS(bits),sizeof(unsigned long));
     if(!bitmap) {
         return NULL;
@@ -113,7 +115,8 @@ static unsigned long *create_zero_bitmap(int fh,uint64_t bits) {
     return bitmap;
 }
 
-static int write_freemap(int fh,uint64_t bits,uint32_t block_size) {
+static int write_freemap(int fh,uint64_t bits,uint32_t block_size) 
+{
     int err;
     unsigned long *bitmap = NULL;
     size_t used_bytes = sizeof(union mfs_padded_super_block) + (BITS_TO_LONGS(bits) * sizeof(unsigned long) * 2);
@@ -121,17 +124,22 @@ static int write_freemap(int fh,uint64_t bits,uint32_t block_size) {
 
     bitmap = create_zero_bitmap(fh,bits);
     if(!bitmap) {
-        return -ENOMEM;
-    }
+        return -ENOMEM; }
+
     for(size_t b = 0; b < used_blocks; b++) {
-        set_bit_bitmap(bitmap,b);
-    }
+        set_bit_bitmap(bitmap,b); }
+
+#ifdef _DEBUG_MKFS_MFS
+    print_bitmap(BITS_TO_LONGS(bits)*sizeof(unsigned long),bitmap);
+#endif
+
     err = write_blockdevice(fh,bitmap,BITS_TO_LONGS(bits)*sizeof(unsigned long));
     free(bitmap);
     return err;
 }
 
-static int write_inodemap(int fh,uint64_t bits) {
+static int write_inodemap(int fh,uint64_t bits) 
+{
     int err;
     unsigned long *bitmap = create_zero_bitmap(fh,bits);
     if(!bitmap) {
