@@ -13,6 +13,7 @@
 #include <superblock.h>
 #include <inode.h>
 #include <fs.h>
+#include <record.h>
 
 #include "libmfs.h"
 
@@ -100,7 +101,7 @@ static int create_superblock(const struct mfs_mkfs_config *conf,struct mfs_super
     sb->block_size  = conf->block_size;
     sb->block_count = blocks;
 
-    sb->freemap_block   = DIV_ROUND_UP(sizeof(union mfs_padded_super_block),conf->block_size);    
+    sb->freemap_block   = DIV_ROUND_UP(MFS_SUPERBLOCK_SIZE,conf->block_size);    
     sb->inodemap_block  = sb->freemap_block  + bitmapblocks;
     sb->rootinode_block = sb->inodemap_block + bitmapblocks;
 
@@ -131,8 +132,15 @@ static int write_freemap(int fh,uint64_t bits,uint32_t block_size)
 {
     int err;
     unsigned long *bitmap = NULL;
-    size_t used_bytes = sizeof(union mfs_padded_super_block) + (BITS_TO_LONGS(bits) * sizeof(unsigned long) * 2);
-    size_t used_blocks = used_bytes / block_size;
+    size_t bitmap_bytes      = BITS_TO_LONGS(bits) * sizeof(unsigned long);
+    size_t bitmap_blocks     = DIV_ROUND_UP(bitmap_bytes,block_size);
+    size_t superblock_blocks = DIV_ROUND_UP(MFS_SUPERBLOCK_SIZE,block_size);
+    size_t rootinode_blocks  = DIV_ROUND_UP(sizeof(struct mfs_inode),block_size);
+    size_t rootrecord_blocks = DIV_ROUND_UP(sizeof(struct mfs_record),block_size);
+    size_t used_blocks       = superblock_blocks + 
+                               ( 2 * bitmap_blocks ) + 
+                               rootinode_blocks +
+                               rootrecord_blocks;
 
     bitmap = create_zero_bitmap(fh,bits);
     if(!bitmap) {
@@ -162,24 +170,41 @@ static int write_inodemap(int fh,uint64_t bits)
     return err;
 }
 
-static int write_rootinode(int fh)
+static int write_rootinode(int fh,struct mfs_super_block *sb)
 {
+    int err;
+    uint64_t record_block = sb->rootinode_block + DIV_ROUND_UP(sizeof(struct mfs_record),sb->block_size);
     time_t now = time(0);
     struct mfs_inode root = {
-        .mode     = S_IFDIR | S_IRWXU | S_IRGRP | S_IXGRP | S_IROTH | S_IXOTH, // drwxr-xr-x
-        .created  = now,
-        .modified = now,
-        .inode_no = MFS_INODE_NUMBER_ROOT,
-        .dir_children_count = 0,
+        .mode         = S_IFDIR | S_IRWXU | S_IRGRP | S_IXGRP | S_IROTH | S_IXOTH, // drwxr-xr-x
+        .created      = now,
+        .modified     = now,
+        .inode_no     = MFS_INODE_NUMBER_ROOT,
+        .inode_block  = MFS_SUPERBLOCK_BLOCK,
+        .record_block = record_block,
     };
-    sprintf(root.name,"/");
-    return  write_blockdevice(fh,&root,sizeof(struct mfs_inode));
+    struct mfs_record rec = {
+        .type = MFS_DIR_RECORD,
+        .dir = {
+            .children_inodes_count = 0,
+        },        
+    };
+    sprintf(rec.dir.name,"/");
+
+    err = write_blockdevice(fh,&root,sizeof(struct mfs_inode));
+    if(err != 0) {
+        fprintf(stderr,"could not write root inode");
+        return err; }
+
+    lseek(fh,sb->block_size * record_block,SEEK_SET);
+    err = write_blockdevice(fh,&rec,sizeof(struct mfs_record));
+    return err;
 }
 
 int main(int argc,char ** argv)
 {
     struct mfs_mkfs_config conf;
-    union mfs_padded_super_block sb;
+    struct mfs_super_block sb;
     uint64_t seekbytes;
     int fh = -1;
     int err = 0;
@@ -187,7 +212,7 @@ int main(int argc,char ** argv)
     uint64_t blocks = 0;
     unsigned int sectorsize = -1;
     memset(&conf,0,sizeof(struct mfs_mkfs_config));
-    memset(&sb,0,sizeof(union mfs_padded_super_block));
+    memset(&sb,0,sizeof(struct mfs_super_block));
 
     err = parse_commandline(argc,argv,&conf);
     if( err != 0 ) {
@@ -230,15 +255,15 @@ int main(int argc,char ** argv)
 
     if(conf.verbose) {
         fprintf(stderr,"creating superblock\n"); }
-    err = create_superblock(&conf,&sb.sb,blocks);
+    err = create_superblock(&conf,&sb,blocks);
     if( err != 0 ) {
         goto release; }
     if(conf.verbose) {
-        fprintf(stderr,"superblock created, version %lu.%lu\n",MFS_GET_MAJOR_VERSION(sb.sb.version),MFS_GET_MINOR_VERSION(sb.sb.version)); }
+        fprintf(stderr,"superblock created, version %lu.%lu\n",MFS_GET_MAJOR_VERSION(sb.version),MFS_GET_MINOR_VERSION(sb.version)); }
 
     if(conf.verbose) {
         fprintf(stderr,"writing superblock\n"); }
-    err = write_blockdevice(fh,&sb,sizeof(union mfs_padded_super_block));
+    err = write_blockdevice(fh,&sb,sizeof(struct mfs_super_block));
     if( err != 0 ) {
         goto release; }
     if(conf.verbose) {
@@ -246,10 +271,10 @@ int main(int argc,char ** argv)
 
     if(conf.verbose) {
         fprintf(stderr,"writing free blocks bitmap (mapsize: %lu KB)\n",(blocks/8/1024)); }
-    seekbytes = lseek(fh,sb.sb.block_size * sb.sb.freemap_block,SEEK_SET);
-    if( seekbytes != (sb.sb.block_size * sb.sb.freemap_block) ) {
+    seekbytes = lseek(fh,sb.block_size * sb.freemap_block,SEEK_SET);
+    if( seekbytes != (sb.block_size * sb.freemap_block) ) {
         err = errno;
-        fprintf(stderr,"error while lseek to freemap %lu: %s\n",(sb.sb.block_size * sb.sb.freemap_block),strerror(errno));
+        fprintf(stderr,"error while lseek to freemap %lu: %s\n",(sb.block_size * sb.freemap_block),strerror(errno));
         goto release; }
     err = write_freemap(fh,blocks,conf.block_size);
     if( err != 0 ) {
@@ -259,10 +284,10 @@ int main(int argc,char ** argv)
 
     if(conf.verbose) {
         fprintf(stderr,"writing inode bitmap (mapsize: %lu KB)\n",(blocks/8/1024)); }
-    seekbytes = lseek(fh,sb.sb.block_size * sb.sb.inodemap_block,SEEK_SET);
-    if( seekbytes != (sb.sb.block_size * sb.sb.inodemap_block) ) {
+    seekbytes = lseek(fh,sb.block_size * sb.inodemap_block,SEEK_SET);
+    if( seekbytes != (sb.block_size * sb.inodemap_block) ) {
         err = errno;
-        fprintf(stderr,"error while lseek to inodemap %lu: %s\n",(sb.sb.block_size * sb.sb.inodemap_block),strerror(errno));
+        fprintf(stderr,"error while lseek to inodemap %lu: %s\n",(sb.block_size * sb.inodemap_block),strerror(errno));
         goto release; }
     err = write_inodemap(fh,blocks);
     if( err != 0 ) {
@@ -272,12 +297,12 @@ int main(int argc,char ** argv)
 
     if(conf.verbose) {
         fprintf(stderr,"writing root inode\n"); }
-    seekbytes = lseek(fh,sb.sb.block_size * sb.sb.rootinode_block,SEEK_SET);
-    if( seekbytes != (sb.sb.block_size * sb.sb.rootinode_block) ) {
+    seekbytes = lseek(fh,sb.block_size * sb.rootinode_block,SEEK_SET);
+    if( seekbytes != (sb.block_size * sb.rootinode_block) ) {
         err = errno;
-        fprintf(stderr,"error while lseek to inodemap %lu: %s\n",(sb.sb.block_size * sb.sb.rootinode_block),strerror(errno));
+        fprintf(stderr,"error while lseek to inodemap %lu: %s\n",(sb.block_size * sb.rootinode_block),strerror(errno));
         goto release; }
-    err = write_rootinode(fh);
+    err = write_rootinode(fh,&sb);
     if( err != 0 ) {
         goto release; }
     if(conf.verbose) {
