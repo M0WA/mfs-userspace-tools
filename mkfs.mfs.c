@@ -102,10 +102,10 @@ static int create_superblock(const struct mfs_mkfs_config *conf,struct mfs_super
     sb->block_count = blocks;
 
     sb->freemap_block   = DIV_ROUND_UP(MFS_SUPERBLOCK_SIZE,conf->block_size);    
-    sb->inodemap_block  = sb->freemap_block  + bitmapblocks;
-    sb->rootinode_block = sb->inodemap_block + bitmapblocks;
+    sb->rootinode_block = sb->freemap_block  + bitmapblocks;
 
     sb->next_ino = MFS_INODE_NUMBER_ROOT + 1;
+    sb->mounted = 0;
     return 0;
 }
 
@@ -283,19 +283,6 @@ int main(int argc,char ** argv)
         fprintf(stderr,"free blocks bitmap written\n"); }
 
     if(conf.verbose) {
-        fprintf(stderr,"writing inode bitmap (mapsize: %lu KB)\n",(blocks/8/1024)); }
-    seekbytes = lseek(fh,sb.block_size * sb.inodemap_block,SEEK_SET);
-    if( seekbytes != (sb.block_size * sb.inodemap_block) ) {
-        err = errno;
-        fprintf(stderr,"error while lseek to inodemap %lu: %s\n",(sb.block_size * sb.inodemap_block),strerror(errno));
-        goto release; }
-    err = write_inodemap(fh,blocks);
-    if( err != 0 ) {
-        goto release; }
-    if(conf.verbose) {
-        fprintf(stderr,"inode bitmap written\n"); }
-
-    if(conf.verbose) {
         fprintf(stderr,"writing root inode\n"); }
     seekbytes = lseek(fh,sb.block_size * sb.rootinode_block,SEEK_SET);
     if( seekbytes != (sb.block_size * sb.rootinode_block) ) {
@@ -312,8 +299,7 @@ release:
     if(fh > 0) {
         if(conf.verbose) {
             fprintf(stderr,"closing blockdevice\n"); }
-        if( close(fh) != 0 ) {
-            fprintf(stderr,"error closing blockdevice: %s\n",strerror(errno)); }
+        close_blockdevice(fh);
         if(conf.verbose) {
             fprintf(stderr,"blockdevice closed\n"); }
     }

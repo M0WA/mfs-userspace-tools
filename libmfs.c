@@ -19,6 +19,15 @@ int open_blockdevice(const char *device, int *fh)
     return 0;
 }
 
+int close_blockdevice(int fh) 
+{
+    if( close(fh) != 0 ) {
+        int err = errno;
+        fprintf(stderr,"could not close block device: %s\n",strerror(errno));
+        return errno;
+    }
+}
+
 int write_blockdevice(int fh,void *data,size_t datalen)
 {
     ssize_t written = write(fh,data,datalen);
@@ -37,7 +46,28 @@ int write_blockdevice(int fh,void *data,size_t datalen)
     return 0;
 }
 
-uint64_t bytecount_blockdevice(int fh) {
+int read_blockdevice(int fh, void *data, size_t datalen) 
+{
+    int nleft = datalen;
+    unsigned char *buf = data;
+    while( nleft > 0 ) {
+        int nread = read(fh,buf,nleft);
+        if( nread == -1 ) {
+            fprintf(stderr,"could read from blockdevice: %s\n",strerror(errno));
+            return errno;
+        } else if( nread == 0 ) {
+            //nothing to be read => wait
+            usleep(50);
+        } else {
+            buf += nread;
+            nleft -= nread;
+        }
+    }
+    return 0;
+}
+
+uint64_t bytecount_blockdevice(int fh) 
+{
     uint64_t size;
     if ( ioctl(fh,BLKGETSIZE64,&size) == -1) {
         return 0;
@@ -45,7 +75,8 @@ uint64_t bytecount_blockdevice(int fh) {
     return size;
 }
 
-unsigned int sectorsize_blockdevice(int fh) {
+unsigned int sectorsize_blockdevice(int fh) 
+{
     unsigned int  size;
     if ( ioctl(fh,BLKSSZGET,&size) == -1) {
         return -1;

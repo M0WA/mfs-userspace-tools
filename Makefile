@@ -1,7 +1,7 @@
 FSNAME=mfs
 GCC=gcc
 
-CFLAGS := -I../kernel-module/
+CFLAGS := -I../mfs-kernel-module/ -ggdb
 
 all: 
 	$(MAKE) clean
