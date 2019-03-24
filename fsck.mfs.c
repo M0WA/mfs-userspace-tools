@@ -8,10 +8,11 @@
 #include <inttypes.h>
 #include <alloca.h>
 
+#include "libmfs.h"
+
 #include <fs.h>
 #include <superblock.h>
-
-#include "libmfs.h"
+#include <inode.h>
 
 #define BITS_PER_BYTE           8
 #define DIV_ROUND_UP(n,d)       (((n) + (d) - 1) / (d))
@@ -32,52 +33,42 @@ struct mfs_fsck_config {
 };
 
 static void show_usage(const char *executable) {
-    printf(
-"checks and repairs a mfs filesystem on a device\n\
-%s -d <devicename> [-v]\n\
+    printf("\
+usage: %s -d <devicename> [-v]\n\n\
+checks and repairs a mfs filesystem on a device\n\
+version %lu.%lu\n\
     -d <device>   : blockdevice name\n\
     -f            : force check\n\
     -v            : verbose, use twice for debug\n\
     -h            : help\n\
-version: %lu.%lu\n\
 ",executable,MFS_GET_MAJOR_VERSION(MFS_VERSION),MFS_GET_MINOR_VERSION(MFS_VERSION));
-}
-
-static void dump_inode()
-{
-}
-
-static void dump_superblock_bitmap(int fh,uint64_t size_bytes)
-{
-    void* buf;
-    int err;
-
-    buf = alloca(size_bytes);
-
-    err = read_blockdevice(fh,buf,size_bytes);
-    if(err) {
-        //TODO: print error
-        return;
-    }
-
-    print_bitmap(size_bytes, buf);
 }
 
 static void dump_superblock(const struct mfs_super_block *sb)
 {
+    uint64_t capacity_mb,freemap_size,metadata_mb;
+
+    freemap_size = BITS_TO_LONGS(sb->block_count) * sizeof(unsigned long);
+    capacity_mb = (sb->block_size*sb->block_count) / ( 1024 * 1024 );
+    metadata_mb = (MFS_SUPERBLOCK_SIZE + freemap_size + sizeof(struct mfs_inode)) / ( 1024 * 1024 );
+
     fprintf(stderr,"\
-superblock: \n\
-    sb->version        : %lu.%lu \n\
-    sb->magic          : 0x%" PRIx64 " \n\
-    sb->block_size     : %" PRIu32 " \n\
-    sb->block_count    : %" PRIu64 " \n\
-    sb->freemap_block  : %" PRIu64 " \n\
-    sb->rootinode_block: %" PRIu64 " \n\
-    sb->next_ino       : %" PRIu64 " \n\
-    sb->mounted        : %u\n",
-    MFS_GET_MAJOR_VERSION(sb->version),MFS_GET_MINOR_VERSION(sb->version),
+superblock:\n\
+    version         : %lu.%lu\n\
+    magic           : 0x%" PRIx64 "\n\
+    block_size      : %" PRIu32 "\n\
+    block_count     : %" PRIu64 "\n\
+    freemap_block   : %" PRIu64 "\n\
+    rootinode_block : %" PRIu64 "\n\
+    next_ino        : %" PRIu64 "\n\
+    mounted         : %u\n\
+filesystem:\n\
+    capacity        : %" PRIu64 "MB\n\
+    metadata        : %" PRIu64 "MB\n\
+        freemap size: %" PRIu64 "B\n\
+",  MFS_GET_MAJOR_VERSION(sb->version),MFS_GET_MINOR_VERSION(sb->version),
     sb->magic,sb->block_size,sb->block_count,sb->freemap_block,
-    sb->rootinode_block,sb->next_ino,sb->mounted);
+    sb->rootinode_block,sb->next_ino,sb->mounted,capacity_mb,metadata_mb,freemap_size);
 }
 
 static int read_superblock(int fh, struct mfs_super_block *sb) 
@@ -112,7 +103,7 @@ static int verify_version(const struct mfs_super_block *sb)
         MFS_GET_MINOR_VERSION(sb->version) != MFS_GET_MINOR_VERSION(MFS_VERSION) ) {
         fprintf(stderr,"fs and userspace tools differ in version, please use up-to-date tools\n");
         return 1;
-    }    
+    }
     return 0;
 }
 
@@ -122,6 +113,7 @@ static int verify_filesystem(const struct mfs_fsck_config *conf)
     uint64_t bitmap_bytes;
     uint64_t bytes,blocks;
     struct mfs_super_block sb;
+    void *freemap;
     
     if(conf->verbose) {
         fprintf(stderr,"opening block device %s\n",conf->device); }
@@ -155,23 +147,39 @@ static int verify_filesystem(const struct mfs_fsck_config *conf)
     if(conf->verbose) {
         fprintf(stderr,"magic number checked\n"); }
 
-    if(sb.mounted && !conf->force) {
+    if(sb.mounted) {
+        if( !conf->force ) {
+            fprintf(stderr,"cannot operate on mounted filesystem, use -f to force");
+            err = EINVAL;
+            goto release;
+        } else {
+            fprintf(stderr,"warn: operating on mounted filesystem");
+        }
+    }
+
+    bitmap_bytes = BITS_TO_LONGS(sb.block_count) * sizeof(unsigned long);
+    freemap = alloca(bitmap_bytes);
+    
+    err = lseek(fh,sb.freemap_block * sb.block_size,SEEK_SET);
+    if( err == (off_t)-1) {
+        fprintf(stderr,"cannot find freemap");
         err = EINVAL;
-        fprintf(stderr,"cannot operate on mounted filesystem, use -f to enforce");
         goto release;
     }
 
-    bytes = bytecount_blockdevice(fh);
-    blocks = bytes / sb.block_size;
-    bitmap_bytes = BITS_TO_LONGS(blocks) * sizeof(unsigned long);
+    err = read_blockdevice(fh,freemap,bitmap_bytes);
+    if(err) {
+        fprintf(stderr,"cannot read freemap");
+        err = EINVAL;
+        goto release;
+    }
 
     if(conf->verbose) {    
         dump_superblock(&sb);
         
         if( conf->verbose > 1 ) {
             fprintf(stderr,"freemap:\n");
-            lseek(fh,sb.freemap_block * sb.block_size,SEEK_SET);
-            dump_superblock_bitmap(fh,bitmap_bytes);
+            print_bitmap(bitmap_bytes, freemap);
         }
     }
 

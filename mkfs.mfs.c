@@ -10,12 +10,11 @@
 #include <sys/stat.h>
 #include <time.h>
 
+#include "libmfs.h"
+
 #include <superblock.h>
 #include <inode.h>
 #include <fs.h>
-#include <record.h>
-
-#include "libmfs.h"
 
 #define MFS_DEFAULT_BLOCKSIZE   0
 #define BITS_PER_BYTE           8
@@ -136,11 +135,9 @@ static int write_freemap(int fh,uint64_t bits,uint32_t block_size)
     size_t bitmap_blocks     = DIV_ROUND_UP(bitmap_bytes,block_size);
     size_t superblock_blocks = DIV_ROUND_UP(MFS_SUPERBLOCK_SIZE,block_size);
     size_t rootinode_blocks  = DIV_ROUND_UP(sizeof(struct mfs_inode),block_size);
-    size_t rootrecord_blocks = DIV_ROUND_UP(sizeof(struct mfs_record),block_size);
     size_t used_blocks       = superblock_blocks + 
                                ( 2 * bitmap_blocks ) + 
-                               rootinode_blocks +
-                               rootrecord_blocks;
+                               rootinode_blocks;
 
     bitmap = create_zero_bitmap(fh,bits);
     if(!bitmap) {
@@ -173,7 +170,6 @@ static int write_inodemap(int fh,uint64_t bits)
 static int write_rootinode(int fh,struct mfs_super_block *sb)
 {
     int err;
-    uint64_t record_block = sb->rootinode_block + DIV_ROUND_UP(sizeof(struct mfs_record),sb->block_size);
     time_t now = time(0);
     struct mfs_inode root = {
         .mode         = S_IFDIR | S_IRWXU | S_IRGRP | S_IXGRP | S_IROTH | S_IXOTH, // drwxr-xr-x
@@ -181,23 +177,18 @@ static int write_rootinode(int fh,struct mfs_super_block *sb)
         .modified     = now,
         .inode_no     = MFS_INODE_NUMBER_ROOT,
         .inode_block  = MFS_SUPERBLOCK_BLOCK,
-        .record_block = record_block,
+        .dir          = {
+            .children   = 0,
+            .data_block = 0
+        }
     };
-    struct mfs_record rec = {
-        .type = MFS_DIR_RECORD,
-        .dir = {
-            .children_inodes_count = 0,
-        },        
-    };
-    sprintf(rec.dir.name,"/");
+    sprintf(root.name,"/");
 
     err = write_blockdevice(fh,&root,sizeof(struct mfs_inode));
     if(err != 0) {
         fprintf(stderr,"could not write root inode");
         return err; }
 
-    lseek(fh,sb->block_size * record_block,SEEK_SET);
-    err = write_blockdevice(fh,&rec,sizeof(struct mfs_record));
     return err;
 }
 

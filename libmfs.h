@@ -4,6 +4,7 @@
 #include <stdint.h>
 
 #define MAX_LEN_DEVICENAME 255
+typedef uint64_t sector_t;
 
 int open_blockdevice(const char *device, int *fh);
 int close_blockdevice(int fh);
