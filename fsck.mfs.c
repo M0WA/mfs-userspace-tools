@@ -73,6 +73,40 @@ filesystem:\n\
     capacity_mb,metadata_mb,freemap_size);
 }
 
+static void dump_freemap(uint64_t size, void *ptr, struct mfs_super_block *sb)
+{
+    unsigned char *b = (unsigned char*) ptr;
+    unsigned char byte;
+    int i, j;
+
+    uint64_t used = 0,fragments = 0;
+    unsigned char laststate = 0;
+
+    for (i=size-1;i>=0;i--)
+    {
+        for (j=7;j>=0;j--)
+        {
+            byte = (b[i] >> j) & 1;
+            if(byte) {
+                used++;
+            }
+            if(laststate != byte && i!=(size-1) && j!=7) {
+                fragments++;
+            }
+            laststate = byte;
+        }
+    }
+    fprintf(stderr,"freemap:\n\
+    used bytes: %" PRIu64 "/%" PRIu64 " bytes\n\
+    used blocks: %" PRIu64 "/%" PRIu64 " blocks )\n\
+    usage: %3.02f%%\n\
+    frag: %" PRIu64 "\n\
+",  used * sb->block_size, sb->block_size * sb->block_count,
+    used, sb->block_count,
+    100.0 / ( sb->block_count / used ),
+    fragments);
+}
+
 static int read_superblock(int fh, struct mfs_super_block *sb) 
 {
     int err;
@@ -178,10 +212,10 @@ static int verify_filesystem(const struct mfs_fsck_config *conf)
 
     if(conf->verbose) {    
         dump_superblock(&sb);
-        
+        dump_freemap(bitmap_bytes,freemap,&sb);
         if( conf->verbose > 1 ) {
-            fprintf(stderr,"freemap:\n");
-            print_bitmap(bitmap_bytes, freemap);
+            fprintf(stderr,"freemap (raw):\n");
+            print_bitmap(bitmap_bytes,freemap);
         }
     }
 
