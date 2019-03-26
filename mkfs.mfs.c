@@ -105,6 +105,7 @@ static int create_superblock(const struct mfs_mkfs_config *conf,struct mfs_super
 
     sb->next_ino = MFS_INODE_NUMBER_ROOT + 1;
     sb->mounted = 0;
+    sb->mount_cnt = 0;
     return 0;
 }
 
@@ -176,8 +177,9 @@ static int write_rootinode(int fh,struct mfs_super_block *sb)
         .created      = now,
         .modified     = now,
         .inode_no     = MFS_INODE_NUMBER_ROOT,
-        .inode_block  = MFS_SUPERBLOCK_BLOCK,
-        .dir          = {
+        .inode_block  = sb->rootinode_block,
+        .parent_inode_block = sb->rootinode_block,
+        .dir = {
             .children   = 0,
             .data_block = 0
         }

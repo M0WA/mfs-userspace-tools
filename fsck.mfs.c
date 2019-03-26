@@ -62,13 +62,15 @@ superblock:\n\
     rootinode_block : %" PRIu64 "\n\
     next_ino        : %" PRIu64 "\n\
     mounted         : %u\n\
+    # mounts        : %" PRIu64 "\n\
 filesystem:\n\
     capacity        : %" PRIu64 "MB\n\
     metadata        : %" PRIu64 "MB\n\
         freemap size: %" PRIu64 "B\n\
 ",  MFS_GET_MAJOR_VERSION(sb->version),MFS_GET_MINOR_VERSION(sb->version),
     sb->magic,sb->block_size,sb->block_count,sb->freemap_block,
-    sb->rootinode_block,sb->next_ino,sb->mounted,capacity_mb,metadata_mb,freemap_size);
+    sb->rootinode_block,sb->next_ino,sb->mounted,sb->mount_cnt,
+    capacity_mb,metadata_mb,freemap_size);
 }
 
 static int read_superblock(int fh, struct mfs_super_block *sb) 
