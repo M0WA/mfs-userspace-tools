@@ -1,3 +1,3 @@
 # userspace-tools
 
-userspace tools for mfs - experimental, do not use
+userspace tools for mfs - really, really, really experimental, use only for educational reasons
